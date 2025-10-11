@@ -1,0 +1,5 @@
+{
+  "name": "UrbanVision",
+  "description": "An application to visualize public plans and points of interest for a specific address. Enter an address to see what's planned for the future of the area and discover nearby amenities.",
+  "requestFramePermissions": []
+}
