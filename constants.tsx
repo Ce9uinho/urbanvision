@@ -29,8 +29,8 @@ export const POI_CATEGORIES: Record<PoiCategory, { [key: string]: string | boole
     highway: 'bus_stop',
   },
   train: {
-    railway: 'station',
-    public_transport: 'station',
+    railway: '^(station|stop|halt)$',
+    public_transport: '^(station|stop_position)$',
   },
   hospital: { amenity: 'hospital' },
   police: { amenity: 'police' },

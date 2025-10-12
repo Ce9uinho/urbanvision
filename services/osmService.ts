@@ -3,7 +3,7 @@ import { POI_CATEGORIES, getPoiCategory } from '../constants.tsx';
 import { haversineDistance } from '../utils/geometry.ts';
 
 const PROXY_URL = 'https://corsproxy.io/?';
-const OVERPASS_API_URL = 'https://overpass-api.de/api/interpreter';
+const OVERPASS_API_URL = 'https://z.overpass-api.de/api/interpreter';
 
 /**
  * Fetches Points of Interest (POIs) directly from the Overpass API.
@@ -14,15 +14,42 @@ const OVERPASS_API_URL = 'https://overpass-api.de/api/interpreter';
 export async function fetchAllPOIs(center: Coordinates, radius: number): Promise<PointOfInterest[]> {
   const { lat, lon } = center;
 
-  const allCategoryQueries = (Object.keys(POI_CATEGORIES) as PoiCategory[]).map((key) => {
-    const tags = POI_CATEGORIES[key];
-    if (key === 'bus') return `nwr["amenity"~"bus_station"](around:${radius},${lat},${lon}); nwr["highway"~"bus_stop"](around:${radius},${lat},${lon});`;
-    if (key === 'train') return `nwr["railway"~"^(station|stop|halt)$"](around:${radius},${lat},${lon}); nwr["public_transport"~"^(station|stop_position)$"](around:${radius},${lat},${lon});`;
-    const tagQueries = Object.entries(tags).map(([k, v]) => v === true ? `[~"^${k}$"~"."]` : `["${k}"="${v}"]`).join('');
-    return `nwr${tagQueries}(around:${radius},${lat},${lon});`;
-  }).join('\n');
+  const tagMap: Map<string, Set<string>> = new Map();
+  const keyExistsSet: Set<string> = new Set();
 
-  const query = `[out:json][timeout:60];( ${allCategoryQueries} ); out center;`;
+  // Group all tag-value pairs from POI_CATEGORIES to build an efficient query
+  Object.values(POI_CATEGORIES).forEach(tags => {
+      Object.entries(tags).forEach(([key, value]) => {
+          if (value === true) {
+              keyExistsSet.add(key);
+              return;
+          }
+          if (typeof value === 'string') {
+              if (!tagMap.has(key)) {
+                  tagMap.set(key, new Set());
+              }
+              tagMap.get(key)!.add(value);
+          }
+      });
+  });
+
+  const queryClauses: string[] = [];
+  
+  tagMap.forEach((values, key) => {
+      const regex = Array.from(values).join('|');
+      const containsRegexChars = /[?^${}()|[\]\\]/.test(regex);
+      
+      // If the values already form a complex regex (e.g., for trains), use it as is.
+      // Otherwise, wrap simple values for an exact match.
+      const finalRegex = containsRegexChars ? regex : `^(${regex})$`;
+      queryClauses.push(`nwr["${key}"~"${finalRegex}"](around:${radius},${lat},${lon});`);
+  });
+
+  keyExistsSet.forEach((key) => {
+      queryClauses.push(`nwr["${key}"](around:${radius},${lat},${lon});`);
+  });
+
+  const query = `[out:json][timeout:90];(\n  ${queryClauses.join('\n  ')}\n);\nout center;`;
 
   try {
     const response = await fetch(`${PROXY_URL}${OVERPASS_API_URL}`, {
@@ -69,8 +96,8 @@ export async function fetchAllPOIs(center: Coordinates, radius: number): Promise
  */
 export async function fetchHighwayExits(center: Coordinates): Promise<HighwayExit[]> {
   const { lat, lon } = center;
-  const query = `[out:json][timeout:30];
-    nwr["highway"="motorway_junction"](around:5000,${lat},${lon});
+  const query = `[out:json][timeout:90];
+    node["highway"="motorway_junction"](around:5000,${lat},${lon});
     out center;`;
 
   try {
