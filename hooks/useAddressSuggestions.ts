@@ -1,9 +1,9 @@
-
 import { useState, useEffect, useCallback } from 'react';
 import { debounce } from '../utils/debounce.ts';
 import type { AddressSuggestion } from '../types.ts';
 
-const NOMINATIM_API = 'https://nominatim.openstreetmap.org/search?format=json&q=';
+const PROXY_URL = 'https://corsproxy.io/?';
+const NOMINATIM_API_URL = 'https://nominatim.openstreetmap.org/search?format=json&countrycodes=pt&q=';
 
 export default function useAddressSuggestions(query: string) {
   const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
@@ -20,12 +20,22 @@ export default function useAddressSuggestions(query: string) {
       setLoading(true);
       setError(null);
       try {
-        const response = await fetch(`${NOMINATIM_API}${encodeURIComponent(searchQuery)}`);
+        const fullUrl = `${PROXY_URL}${encodeURIComponent(NOMINATIM_API_URL + searchQuery)}`;
+        const response = await fetch(fullUrl);
         if (!response.ok) {
           throw new Error('Failed to fetch address suggestions.');
         }
         const data: AddressSuggestion[] = await response.json();
-        setSuggestions(data);
+        
+        // Filter out duplicate suggestions
+        const seen = new Set();
+        const uniqueSuggestions = data.filter(item => {
+            const duplicate = seen.has(item.display_name);
+            seen.add(item.display_name);
+            return !duplicate;
+        });
+
+        setSuggestions(uniqueSuggestions);
       } catch (e) {
         if (e instanceof Error) {
             setError(e.message);

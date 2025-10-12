@@ -19,7 +19,13 @@ export type PoiCategory =
   | 'bus'
   | 'train'
   | 'shop'
-  | 'hospital';
+  | 'hospital'
+  | 'police'
+  | 'fire_station'
+  | 'hairdresser'
+  | 'lawyer'
+  | 'supermarket'
+  | 'accountant';
 
 export interface PointOfInterest {
   id: number;
@@ -28,4 +34,9 @@ export interface PointOfInterest {
   tags: Record<string, any>;
   category: PoiCategory;
   distance?: number;
+}
+
+export interface HighwayExit {
+  name: string;
+  distance: number;
 }

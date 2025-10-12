@@ -31,8 +31,17 @@ export default function MapComponent({ center, pois, radius, selectedPoiId }: Ma
   useEffect(() => {
     if (mapContainerRef.current && !mapRef.current) {
       mapRef.current = L.map(mapContainerRef.current).setView([center.lat, center.lon], 14);
+
+      // Set bounds for Portugal to constrain map navigation
+      const portugalBounds = L.latLngBounds(
+        L.latLng(36.5, -10.0), // Southwest corner
+        L.latLng(42.5, -6.0)   // Northeast corner
+      );
+      mapRef.current.setMaxBounds(portugalBounds);
+
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+        minZoom: 7, // Prevent zooming out too far
       }).addTo(mapRef.current);
       layerGroupRef.current = L.layerGroup().addTo(mapRef.current);
     }

@@ -1,5 +1,5 @@
 {
   "name": "UrbanVision",
-  "description": "An application to visualize public plans and points of interest for a specific address. Enter an address to see what's planned for the future of the area and discover nearby amenities.",
+  "description": "Uma aplicação para visualizar planos públicos e pontos de interesse para uma morada específica. Insira uma morada para ver o que está planeado para o futuro da zona e descobrir as comodidades próximas.",
   "requestFramePermissions": []
 }
