@@ -17,6 +17,23 @@ export const POI_CATEGORY_COLORS: Record<PoiCategory, { bg: string; text: string
   shop: { bg: 'bg-violet-100', text: 'text-violet-600' },
 };
 
+export const POI_MAP_COLORS: Record<PoiCategory, string> = {
+  school: 'bg-indigo-600',
+  cafe: 'bg-amber-600',
+  restaurant: 'bg-orange-600',
+  park: 'bg-green-600',
+  bus: 'bg-sky-600',
+  train: 'bg-cyan-600',
+  hospital: 'bg-red-600',
+  police: 'bg-blue-700',
+  fire_station: 'bg-rose-600',
+  hairdresser: 'bg-pink-600',
+  lawyer: 'bg-gray-700',
+  supermarket: 'bg-lime-600',
+  accountant: 'bg-stone-700',
+  shop: 'bg-violet-600',
+};
+
 
 // Fix: Consolidate POI categories, replacing 'transport' with 'bus' and 'train' for consistency.
 export const POI_CATEGORIES: Record<PoiCategory, { [key: string]: string | boolean }> = {

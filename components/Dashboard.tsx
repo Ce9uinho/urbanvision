@@ -135,7 +135,7 @@ export default function Dashboard({ startPoint, onReset }: DashboardProps): Reac
 
         const formatDistance = (poi: PointOfInterest | null): string => {
             if (!poi) return 'Não encontrado';
-            const name = poi.tags.name || `Ponto de interesse (${poi.category})`;
+            const name = poi.tags.name || poi.tags.ref || `Ponto de interesse (${poi.category})`;
             return `${name} a ${poi.distance?.toFixed(0)}m`;
         }
         
@@ -217,13 +217,17 @@ export default function Dashboard({ startPoint, onReset }: DashboardProps): Reac
             fetchAllPOIs(startPoint.coords, FIXED_RADIUS),
             fetchHighwayExits(startPoint.coords)
           ]);
+
+          // Filter out POIs that are "unnamed" (no name or ref tag)
+          const identifiedPois = fetchedPois.filter(poi => poi.tags.name || poi.tags.ref);
           
-          const processedPois = fetchedPois.reduce((acc: PointOfInterest[], currentPoi) => {
+          const processedPois = identifiedPois.reduce((acc: PointOfInterest[], currentPoi) => {
             const isTransport = currentPoi.category === 'bus' || currentPoi.category === 'train';
             if (isTransport) {
                 const isDuplicate = acc.some(existingPoi => 
                     (existingPoi.category === 'bus' || existingPoi.category === 'train') &&
-                    existingPoi.tags.name === currentPoi.tags.name &&
+                    // Only consider it a duplicate if they share the same non-empty name
+                    (!!currentPoi.tags.name && existingPoi.tags.name === currentPoi.tags.name) &&
                     haversineDistance(
                         { lat: existingPoi.lat, lon: existingPoi.lon },
                         { lat: currentPoi.lat, lon: currentPoi.lon }
@@ -391,7 +395,7 @@ export default function Dashboard({ startPoint, onReset }: DashboardProps): Reac
                             <ul>
                             {displayedPois[category].map(poi => {
                                     const detailsAvailable = poi.tags.cuisine || poi.tags.opening_hours || poi.tags.website || poi.tags['contact:phone'];
-                                    const poiName = poi.tags.name || `Unnamed ${poi.category}`;
+                                    const poiName = poi.tags.name || poi.tags.ref;
                                     const colors = POI_CATEGORY_COLORS[poi.category];
                                     
                                     const addressParts = startPoint.address.split(',').map(p => p.trim());
