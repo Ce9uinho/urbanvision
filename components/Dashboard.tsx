@@ -94,9 +94,11 @@ const categorySearchTerms: Partial<Record<PoiCategory, string>> = {
   accountant: 'contabilista',
 };
 
-const FIXED_RADIUS = 1000; // Fixed search radius of 1km
-
 export default function Dashboard({ startPoint, onReset }: DashboardProps): React.ReactElement {
+  // searchRadius triggers the API call. displayRadius is for the UI slider and map visual.
+  const [searchRadius, setSearchRadius] = useState(1000);
+  const [displayRadius, setDisplayRadius] = useState(1000);
+  
   const [pois, setPois] = useState<PointOfInterest[]>([]);
   const [loading, setLoading] = useState(true);
   const [summary, setSummary] = useState('');
@@ -104,7 +106,7 @@ export default function Dashboard({ startPoint, onReset }: DashboardProps): Reac
   const [selectedPoiId, setSelectedPoiId] = useState<number | null>(null);
   const [isExporting, setIsExporting] = useState(false);
 
-  const handleGenerateSummary = useCallback(async (currentPois: PointOfInterest[], highwayExits: HighwayExit[], address: string) => {
+  const handleGenerateSummary = useCallback(async (currentPois: PointOfInterest[], highwayExits: HighwayExit[], address: string, radius: number) => {
     if (currentPois.length === 0) {
         setSummary("Não foram encontrados pontos de interesse para resumir.");
         setLoadingSummary(false);
@@ -164,7 +166,7 @@ export default function Dashboard({ startPoint, onReset }: DashboardProps): Reac
             Seja direto e profissional na resposta. Não inclua saudações ou frases de abertura. Use formatação limpa, com parágrafos bem definidos e negrito apenas para o título principal.
 
             Esta zona habitacional localiza-se em: ${locationName}.
-            O raio de pesquisa para comodidades locais foi de ${FIXED_RADIUS}m.
+            O raio de pesquisa para comodidades locais foi de ${radius}m.
 
             Dados de Proximidade (Pontos Chave):
             ${keyDistancesSummary}
@@ -214,7 +216,7 @@ export default function Dashboard({ startPoint, onReset }: DashboardProps): Reac
         setLoadingSummary(true);
         try {
           const [fetchedPois, fetchedExits] = await Promise.all([
-            fetchAllPOIs(startPoint.coords, FIXED_RADIUS),
+            fetchAllPOIs(startPoint.coords, searchRadius),
             fetchHighwayExits(startPoint.coords)
           ]);
 
@@ -241,7 +243,7 @@ export default function Dashboard({ startPoint, onReset }: DashboardProps): Reac
           }, [] as PointOfInterest[]);
 
           setPois(processedPois);
-          handleGenerateSummary(processedPois, fetchedExits, startPoint.address);
+          handleGenerateSummary(processedPois, fetchedExits, startPoint.address, searchRadius);
         } catch (error) {
           console.error("Failed to fetch POIs", error);
           setSummary("Falha ao carregar os dados da área. Por favor, tente novamente.");
@@ -252,7 +254,7 @@ export default function Dashboard({ startPoint, onReset }: DashboardProps): Reac
     };
     
     runSearch();
-  }, [startPoint, handleGenerateSummary]);
+  }, [startPoint, handleGenerateSummary, searchRadius]);
 
   const groupedPois = useMemo(() => {
     return pois.reduce((acc, poi) => {
@@ -277,43 +279,252 @@ export default function Dashboard({ startPoint, onReset }: DashboardProps): Reac
 
   const handleExportPDF = async () => {
     setIsExporting(true);
-    const reportContent = document.getElementById('report-content');
-    if (!reportContent) {
-        console.error("Report content element not found!");
-        setIsExporting(false);
-        return;
-    }
+    
     try {
-        const canvas = await html2canvas(reportContent, {
-            scale: 2,
-            useCORS: true,
-        });
-        const imgData = canvas.toDataURL('image/png');
-        
+        // 1. Setup PDF
         const pdf = new jsPDF({
             orientation: 'portrait',
-            unit: 'px',
+            unit: 'mm',
             format: 'a4',
         });
 
-        const pdfWidth = pdf.internal.pageSize.getWidth();
-        const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
-        let heightLeft = pdfHeight;
-        let position = 0;
+        // Config variables
+        const pageWidth = pdf.internal.pageSize.getWidth();
         const pageHeight = pdf.internal.pageSize.getHeight();
+        const margin = 20;
+        const contentWidth = pageWidth - (margin * 2);
+        let yPos = margin;
 
-        pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, pdfHeight);
-        heightLeft -= pageHeight;
+        const primaryColor = [37, 99, 235]; // Tailwind blue-600
+        const darkColor = [31, 41, 55]; // Gray-800
+        const lightGray = [156, 163, 175]; // Gray-400
 
-        while (heightLeft > 0) {
-            position = heightLeft - pdfHeight;
-            pdf.addPage();
-            pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, pdfHeight);
-            heightLeft -= pageHeight;
-        }
+        // Helper: Add Footer with pagination
+        const addFooter = (pageNo: number) => {
+            pdf.setFontSize(8);
+            pdf.setTextColor(lightGray[0], lightGray[1], lightGray[2]);
+            pdf.text(`UrbanVision - Relatório Gerado por IA | Página ${pageNo}`, pageWidth / 2, pageHeight - 10, { align: 'center' });
+        };
+
+        // --- PAGE 1: COVER ---
         
-        const fileName = `UrbanVision_Report_${startPoint.address.split(',')[0].replace(/\s/g, '_')}.pdf`;
+        // Header
+        pdf.setFont('helvetica', 'bold');
+        pdf.setFontSize(24);
+        pdf.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+        pdf.text("UrbanVision", margin, yPos + 10);
+        
+        pdf.setFont('helvetica', 'normal');
+        pdf.setFontSize(12);
+        pdf.setTextColor(darkColor[0], darkColor[1], darkColor[2]);
+        pdf.text("Relatório de Inteligência de Localização", margin, yPos + 20);
+
+        // Divider
+        pdf.setDrawColor(200, 200, 200);
+        pdf.line(margin, yPos + 30, pageWidth - margin, yPos + 30);
+        
+        // Capture Map (High Quality & Fix Distortion)
+        const mapElement = document.querySelector('.leaflet-container') as HTMLElement;
+        if (mapElement) {
+             const canvas = await html2canvas(mapElement, {
+                scale: 2, // Retinal quality
+                useCORS: true, // Must be true for Map Tiles
+                allowTaint: false, // Must be false to allow toDataURL()
+                logging: false,
+                width: mapElement.offsetWidth, 
+                height: mapElement.offsetHeight,
+                scrollX: 0,
+                scrollY: -window.scrollY, // Ensure correct vertical capture position
+                ignoreElements: (element) => {
+                    // Cleaner way to remove controls without DOM manipulation issues
+                    return element.classList.contains('leaflet-control-container');
+                }
+            });
+
+            const imgData = canvas.toDataURL('image/png');
+            
+            // Get original image properties to calculate Aspect Ratio
+            const imgProps = pdf.getImageProperties(imgData);
+            const pdfImageWidth = contentWidth;
+            const pdfImageHeight = (imgProps.height * pdfImageWidth) / imgProps.width;
+
+            pdf.addImage(imgData, 'PNG', margin, yPos + 40, pdfImageWidth, pdfImageHeight);
+            
+            // Draw a neat border around map
+            pdf.setDrawColor(230, 230, 230);
+            pdf.rect(margin, yPos + 40, pdfImageWidth, pdfImageHeight);
+            
+            yPos = yPos + 40 + pdfImageHeight + 20;
+        } else {
+            yPos += 50;
+        }
+
+        // Property Info
+        pdf.setFont('helvetica', 'bold');
+        pdf.setFontSize(16);
+        pdf.setTextColor(darkColor[0], darkColor[1], darkColor[2]);
+        pdf.text("Localização Analisada", margin, yPos);
+        yPos += 10;
+
+        pdf.setFont('helvetica', 'normal');
+        pdf.setFontSize(12);
+        
+        // Handle potentially long addresses with splitTextToSize
+        const addressLines = pdf.splitTextToSize(startPoint.address, contentWidth);
+        pdf.text(addressLines, margin, yPos);
+        yPos += (addressLines.length * 6) + 10;
+
+        pdf.setFontSize(10);
+        pdf.setTextColor(100, 100, 100);
+        pdf.text(`Data do Relatório: ${new Date().toLocaleDateString('pt-PT')}`, margin, yPos);
+        pdf.text(`Raio de Análise: ${(displayRadius / 1000).toFixed(1)} km`, margin, yPos + 5);
+
+        addFooter(1);
+
+
+        // --- PAGE 2: SUMMARY & DATA ---
+        pdf.addPage();
+        let pageCount = 2;
+        yPos = margin;
+
+        // Title: AI Analysis
+        pdf.setFont('helvetica', 'bold');
+        pdf.setFontSize(16);
+        pdf.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+        pdf.text("Análise da Zona (IA)", margin, yPos);
+        yPos += 10;
+
+        // AI Summary Logic to handle Bold text (**)
+        pdf.setFontSize(11);
+        pdf.setTextColor(darkColor[0], darkColor[1], darkColor[2]);
+        
+        const summaryParagraphs = summary.split('\n');
+        
+        summaryParagraphs.forEach(para => {
+            if (!para.trim()) {
+                yPos += 5; // Paragraph spacing
+                return;
+            }
+
+            // Simple parser for bold text marked with **
+            const parts = para.split('**');
+            let currentLineX = margin;
+            
+            // We need to construct lines manually to handle bolding mixed with wrapping
+            // For simplicity in this specialized generator, we will print block by block but handle simple titles
+            
+            if (parts.length > 1) {
+                // If line has bold markers, check if it's a title (short, bold) or inline
+                if (parts.length === 3 && parts[0] === '' && parts[2] === '') {
+                    // It's a header like **Title**
+                    pdf.setFont('helvetica', 'bold');
+                    pdf.text(parts[1], margin, yPos);
+                    pdf.setFont('helvetica', 'normal');
+                    yPos += 6;
+                } else {
+                    // Inline bolding - Simplification: Print plain text for long blocks to avoid complex X calculations on PDF
+                    // Or strip markdown for clean look
+                    const cleanText = para.replace(/\*\*/g, '');
+                    const lines = pdf.splitTextToSize(cleanText, contentWidth);
+                    pdf.text(lines, margin, yPos);
+                    yPos += (lines.length * 5) + 2;
+                }
+            } else {
+                const lines = pdf.splitTextToSize(para, contentWidth);
+                pdf.text(lines, margin, yPos);
+                yPos += (lines.length * 5) + 2;
+            }
+
+            // Page Break Check
+            if (yPos > pageHeight - margin - 20) {
+                addFooter(pageCount);
+                pdf.addPage();
+                pageCount++;
+                yPos = margin;
+            }
+        });
+
+        yPos += 15;
+
+        // --- POI LISTINGS ---
+        
+        // Header
+        pdf.setFont('helvetica', 'bold');
+        pdf.setFontSize(16);
+        pdf.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+        pdf.text("Pontos de Interesse Detalhados", margin, yPos);
+        yPos += 10;
+        
+        // Divider
+        pdf.setDrawColor(200, 200, 200);
+        pdf.setLineWidth(0.5);
+        pdf.line(margin, yPos, pageWidth - margin, yPos);
+        yPos += 10;
+
+        const sortedCategories = (Object.keys(displayedPois) as (keyof typeof displayedPois)[]).sort();
+
+        sortedCategories.forEach((category) => {
+             // Check if we need a page break before starting a category header
+             if (yPos > pageHeight - margin - 40) {
+                addFooter(pageCount);
+                pdf.addPage();
+                pageCount++;
+                yPos = margin;
+            }
+
+            // Category Header
+            pdf.setFont('helvetica', 'bold');
+            pdf.setFontSize(12);
+            pdf.setTextColor(darkColor[0], darkColor[1], darkColor[2]);
+            // Draw a light background for category header
+            pdf.setFillColor(243, 244, 246); // Gray-100
+            pdf.rect(margin, yPos - 5, contentWidth, 8, 'F');
+            pdf.text(categoryDisplayNames[category], margin + 2, yPos);
+            yPos += 10;
+
+            // List Items
+            pdf.setFont('helvetica', 'normal');
+            pdf.setFontSize(10);
+            
+            displayedPois[category].forEach((poi) => {
+                 if (yPos > pageHeight - margin) {
+                    addFooter(pageCount);
+                    pdf.addPage();
+                    pageCount++;
+                    yPos = margin + 10;
+                }
+
+                const name = poi.tags.name || poi.tags.ref || "Local sem nome";
+                const dist = `${poi.distance?.toFixed(0)} m`;
+
+                // Draw Name
+                pdf.text(name, margin + 5, yPos);
+                
+                // Draw Dots .......
+                const nameWidth = pdf.getTextWidth(name);
+                const distWidth = pdf.getTextWidth(dist);
+                const dotsWidth = contentWidth - nameWidth - distWidth - 10;
+                if (dotsWidth > 0) {
+                    pdf.setTextColor(200, 200, 200);
+                    pdf.text(".".repeat(Math.floor(dotsWidth / 2)), margin + 5 + nameWidth + 2, yPos);
+                }
+
+                // Draw Distance
+                pdf.setTextColor(darkColor[0], darkColor[1], darkColor[2]);
+                pdf.text(dist, pageWidth - margin - distWidth, yPos);
+
+                yPos += 6;
+            });
+            
+            yPos += 8; // Space between categories
+        });
+
+        addFooter(pageCount);
+
+        // Save
+        const fileName = `UrbanVision_Relatorio_${startPoint.address.split(',')[0].replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
         pdf.save(fileName);
+
     } catch (error) {
         console.error("Error generating PDF:", error);
     } finally {
@@ -349,7 +560,7 @@ export default function Dashboard({ startPoint, onReset }: DashboardProps): Reac
             <div className="flex items-center space-x-2 flex-shrink-0">
                 <button onClick={handleExportPDF} disabled={isExporting || loading} className="bg-green-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-green-700 disabled:bg-gray-400 transition-all duration-200 ease-in-out flex items-center space-x-2 shadow-sm hover:shadow-md">
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
-                    <span>{isExporting ? 'A exportar...' : 'Exportar PDF'}</span>
+                    <span>{isExporting ? 'A gerar PDF...' : 'Baixar PDF Premium'}</span>
                 </button>
                 <button onClick={onReset} className="bg-white text-gray-700 font-semibold py-2 px-4 rounded-lg hover:bg-gray-100 transition-all duration-200 ease-in-out flex items-center space-x-2 border border-gray-300 shadow-sm hover:shadow-md">
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" /></svg>
@@ -361,11 +572,44 @@ export default function Dashboard({ startPoint, onReset }: DashboardProps): Reac
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 text-gray-800">
         
+        {/* Radius Control Bar */}
+        <div className="bg-white p-4 rounded-lg shadow-sm mb-6 flex flex-col sm:flex-row items-start sm:items-center gap-4 border border-gray-100">
+            <div className="flex items-center gap-2">
+                <div className="p-2 bg-blue-100 rounded-lg text-blue-600">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                </div>
+                <div>
+                    <label htmlFor="radius-slider" className="block text-sm font-medium text-gray-700">Raio de Pesquisa</label>
+                    <p className="text-xs text-gray-500">Defina a distância para encontrar locais</p>
+                </div>
+            </div>
+            <div className="flex-1 w-full sm:w-auto flex items-center gap-4">
+                <input 
+                    id="radius-slider"
+                    type="range" 
+                    min="500" 
+                    max="3000" 
+                    step="100" 
+                    value={displayRadius} 
+                    onChange={(e) => setDisplayRadius(Number(e.target.value))}
+                    onMouseUp={() => setSearchRadius(displayRadius)}
+                    onTouchEnd={() => setSearchRadius(displayRadius)}
+                    className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                />
+                <span className="min-w-[4rem] text-right font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded text-sm">
+                    {(displayRadius / 1000).toFixed(1)} km
+                </span>
+            </div>
+        </div>
+
         <div id="report-content">
             {/* Map & Summary */}
             <div className="grid grid-cols-1 lg:grid-cols-5 gap-8 mb-8">
                 <div className="lg:col-span-3 bg-white rounded-lg shadow overflow-hidden h-96 lg:h-auto">
-                    <MapComponent center={startPoint.coords} pois={pois} radius={FIXED_RADIUS} selectedPoiId={selectedPoiId} />
+                    {/* MapComponent receives displayRadius to update circle instantly, while fetch depends on searchRadius */}
+                    <MapComponent center={startPoint.coords} pois={pois} radius={displayRadius} selectedPoiId={selectedPoiId} />
                 </div>
                 <div className="lg:col-span-2 bg-white p-6 rounded-lg shadow flex flex-col">
                     <div className="flex items-center mb-4">

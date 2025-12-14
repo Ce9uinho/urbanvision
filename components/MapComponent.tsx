@@ -28,10 +28,18 @@ export default function MapComponent({ center, pois, radius, selectedPoiId }: Ma
   const radiusCircleRef = useRef<any | null>(null);
   const markerRefs = useRef<Record<number, any>>({});
 
-  // Initialize map
+  // Initialize map (Run once)
   useEffect(() => {
     if (mapContainerRef.current && !mapRef.current) {
-      mapRef.current = L.map(mapContainerRef.current).setView([center.lat, center.lon], 14);
+      // CRITICAL FIX: preferCanvas forces vector layers (circles) to render on Canvas instead of SVG.
+      // This solves the issue where html2canvas renders the circle offset from the marker.
+      // We also disable animations to ensure the DOM state is simple and static for capture.
+      mapRef.current = L.map(mapContainerRef.current, {
+        preferCanvas: true,
+        zoomAnimation: false,
+        markerZoomAnimation: false,
+        fadeAnimation: false
+      }).setView([center.lat, center.lon], 14);
 
       const portugalBounds = L.latLngBounds(L.latLng(36.5, -10.0), L.latLng(42.5, -6.0));
       mapRef.current.setMaxBounds(portugalBounds);
@@ -39,6 +47,7 @@ export default function MapComponent({ center, pois, radius, selectedPoiId }: Ma
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
         minZoom: 7,
+        crossOrigin: true, 
       }).addTo(mapRef.current);
       
       clusterGroupRef.current = L.markerClusterGroup({
@@ -56,25 +65,45 @@ export default function MapComponent({ center, pois, radius, selectedPoiId }: Ma
       });
       mapRef.current.addLayer(clusterGroupRef.current);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Update view, center marker, radius circle, and POIs
+  // Effect 1: Update View and Center Marker when center changes
   useEffect(() => {
-    if (mapRef.current && clusterGroupRef.current) {
-      const map = mapRef.current;
-      map.flyTo([center.lat, center.lon], 14, { duration: 1 });
+    if (!mapRef.current) return;
 
-      clusterGroupRef.current.clearLayers();
-      markerRefs.current = {};
-      if (centerMarkerRef.current) map.removeLayer(centerMarkerRef.current);
-      if (radiusCircleRef.current) map.removeLayer(radiusCircleRef.current);
+    // Use setView instead of flyTo when animations are disabled for instant snapping
+    mapRef.current.setView([center.lat, center.lon], 14);
 
-      centerMarkerRef.current = L.marker([center.lat, center.lon]).addTo(map).bindPopup('A sua morada');
-      radiusCircleRef.current = L.circle([center.lat, center.lon], {
-        radius: radius, color: '#3b82f6', fillColor: '#60a5fa', fillOpacity: 0.1, weight: 1,
-      }).addTo(map);
+    if (!centerMarkerRef.current) {
+        centerMarkerRef.current = L.marker([center.lat, center.lon]).addTo(mapRef.current).bindPopup('A sua morada');
+    } else {
+        centerMarkerRef.current.setLatLng([center.lat, center.lon]);
+    }
+  }, [center]);
 
-      pois.forEach(poi => {
+  // Effect 2: Update Radius Circle when center or radius changes
+  useEffect(() => {
+    if (!mapRef.current) return;
+
+    if (!radiusCircleRef.current) {
+        radiusCircleRef.current = L.circle([center.lat, center.lon], {
+            radius: radius, color: '#3b82f6', fillColor: '#60a5fa', fillOpacity: 0.1, weight: 1,
+        }).addTo(mapRef.current);
+    } else {
+        radiusCircleRef.current.setLatLng([center.lat, center.lon]);
+        radiusCircleRef.current.setRadius(radius);
+    }
+  }, [center, radius]);
+
+  // Effect 3: Update POI Markers only when POIs list changes
+  useEffect(() => {
+    if (!mapRef.current || !clusterGroupRef.current) return;
+
+    clusterGroupRef.current.clearLayers();
+    markerRefs.current = {};
+
+    pois.forEach(poi => {
         const bgColor = POI_MAP_COLORS[poi.category] || 'bg-gray-500';
         const iconHtml = `<div class="w-8 h-8 rounded-full ${bgColor} text-white flex items-center justify-center shadow-md p-1.5">${POI_CATEGORY_ICONS[poi.category]}</div>`;
         const poiIcon = L.divIcon({
@@ -90,10 +119,9 @@ export default function MapComponent({ center, pois, radius, selectedPoiId }: Ma
         clusterGroupRef.current.addLayer(marker);
         markerRefs.current[poi.id] = marker;
       });
-    }
-  }, [center, radius, pois]);
+  }, [pois]);
 
-  // Handle POI selection highlight
+  // Effect 4: Handle Selection Highlight
   useEffect(() => {
     Object.values(markerRefs.current).forEach((marker: any) => {
         if (marker._icon) {
